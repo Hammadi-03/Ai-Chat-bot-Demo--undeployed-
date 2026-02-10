@@ -151,6 +151,8 @@ Accuracy over assumptions, Empathy over efficiency, Insight over surface-level r
                     await new Promise(r => setTimeout(r, 600)); setLayer('emotional');
                     if (currentImage) { await new Promise(r => setTimeout(r, 600)); setLayer('multimodal'); }
 
+                    console.log("Calling Gemini API with model gemini-1.5-flash...");
+
                     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -166,12 +168,29 @@ Accuracy over assumptions, Empathy over efficiency, Insight over surface-level r
                     });
 
                     const data = await response.json();
-                    if (data.error) throw new Error(data.error.message);
+
+                    if (!response.ok) {
+                        console.error("API Error Detailed:", data);
+                        throw new Error(data.error?.message || `API Error: ${response.status} ${response.statusText}`);
+                    }
+
+                    if (!data.candidates || data.candidates.length === 0) {
+                        console.error("No candidates in response:", data);
+                        throw new Error("AI did not return any answer. Please try a different prompt.");
+                    }
 
                     const aiText = data.candidates[0].content.parts[0].text;
                     setMessages(prev => [...prev, { text: aiText, sender: "Murjan AI", isAi: true, metadata: { hasImage: !!currentImage } }]);
+                    setError("");
                 } catch (err) {
+                    console.error("Fetch Error:", err);
                     setError(err.message);
+
+                    setMessages(prev => [...prev, {
+                        text: `⚠️ **Error:** ${err.message}\n\nPlease check your API key and internet connection.`,
+                        sender: "System",
+                        isAi: true
+                    }]);
                 } finally {
                     setIsProcessing(false);
                 }
