@@ -5,6 +5,17 @@ import ImageUpload from './components/ImageUpload.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
 import { murjanService } from './services/murjanService.js';
 import { detectEmotion } from './utils/emotionDetector.js';
+import { AnimatePresence, motion } from 'motion/react';
+import { Paperclip, Mic, Send, Lightbulb, Globe } from 'lucide-react';
+
+const PLACEHOLDERS = [
+  "Ask Murjan anything...",
+  "Analyze this image for me",
+  "What is the meaning of life?",
+  "Summarize this article",
+  "Help me write some code",
+  "Explain quantum computing",
+];
 
 function App() {
   const [messages, setMessages] = useState([
@@ -25,12 +36,53 @@ function App() {
   const [theme, setTheme] = useState('light');
   const [error, setError] = useState('');
 
+  // Chat input UI state
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [showPlaceholder, setShowPlaceholder] = useState(true);
+  const [inputActive, setInputActive] = useState(false);
+  const [thinkActive, setThinkActive] = useState(false);
+  const [deepSearchActive, setDeepSearchActive] = useState(false);
+
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
+  const inputWrapperRef = useRef(null);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [inputValue]);
+
+  // Cycle placeholder text
+  useEffect(() => {
+    if (inputActive || inputValue) return;
+    const interval = setInterval(() => {
+      setShowPlaceholder(false);
+      setTimeout(() => {
+        setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
+        setShowPlaceholder(true);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [inputActive, inputValue]);
+
+  // Close expanded state when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (inputWrapperRef.current && !inputWrapperRef.current.contains(event.target)) {
+        if (!inputValue) setInputActive(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [inputValue]);
 
   // Check for API key in environment
   useEffect(() => {
@@ -122,13 +174,16 @@ function App() {
       setMessages((prev) => [...prev, aiResponse]);
     } catch (err) {
       console.error('Error getting AI response:', err);
-      setError(err.message || 'Failed to get response from Murjan AI');
 
-      // Add error message to chat
+      // Do not use the generic top error box if it's an API error that goes into chat
+      // setError(err.message || 'Failed to get response from Murjan AI');
+
+      // Add specialized error message to chat history
       const errorMsg = {
-        text: `I apologize, but I encountered an error: ${err.message}. Please check your API key and try again.`,
-        sender: "System",
-        isAi: true
+        text: `**Service Disruption:**\n${err.message || 'Unknown network error. Please try again.'}\n\n*If this persists, please check your API keys or switch models in Settings.*`,
+        sender: "System Diagnostics",
+        isAi: true,
+        isError: true
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -253,40 +308,197 @@ function App() {
         </div>
       )}
 
-      {/* Input Area */}
-      <form onSubmit={handleSend} className={`p-4 flex flex-col gap-3 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'
-        } border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
-
-        {/* Image Upload */}
-        <div className="flex items-center gap-2">
+      {/* Animated Chat Input Area */}
+      <div className={`p-4 ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-t`}>
+        {/* Image Upload row */}
+        <div className="flex items-center gap-2 mb-3">
           <ImageUpload onImageSelect={handleImageSelect} disabled={isProcessing} />
           {imageData.preview && (
             <span className="text-xs text-green-600 font-semibold">✓ Image ready for analysis</span>
           )}
         </div>
 
-        {/* Text Input */}
-        <div className="flex gap-3">
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask Murjan anything..."
-            disabled={isProcessing}
-            className={`flex-1 border ${theme === 'dark'
-              ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
-              : 'bg-white border-gray-300 text-black'
-              } rounded-full px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-50 shadow-sm`}
-          />
-          <button
-            type="submit"
-            disabled={isProcessing || (!inputValue.trim() && !imageData.base64)}
-            className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-7 py-3 rounded-full text-sm font-bold hover:shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        {/* Animated input box */}
+        <form onSubmit={handleSend}>
+          <motion.div
+            ref={inputWrapperRef}
+            onClick={() => setInputActive(true)}
+            animate={inputActive || inputValue ? 'expanded' : 'collapsed'}
+            initial="collapsed"
+            variants={{
+              collapsed: {
+                height: 64,
+                boxShadow: '0 2px 12px 0 rgba(0,0,0,0.08)',
+                transition: { type: 'spring', stiffness: 120, damping: 18 },
+              },
+              expanded: {
+                height: 130,
+                boxShadow: '0 8px 32px 0 rgba(0,0,0,0.14)',
+                transition: { type: 'spring', stiffness: 120, damping: 18 },
+              },
+            }}
+            style={{
+              overflow: 'hidden',
+              borderRadius: 24,
+              background: theme === 'dark' ? '#1f2937' : '#ffffff',
+              border: theme === 'dark' ? '1px solid #374151' : '1px solid rgba(0,0,0,0.09)',
+              cursor: 'text',
+            }}
           >
-            {isProcessing ? '...' : 'Send'}
-          </button>
-        </div>
-      </form>
+            {/* Input row */}
+            <div className="flex items-start gap-2 px-3 pt-2.5 pb-1.5">
+              {/* Attach */}
+              <button
+                className={`mt-1 p-2 rounded-full transition-colors shrink-0 ${theme === 'dark' ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                title="Attach file"
+                type="button"
+                tabIndex={-1}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Paperclip size={18} />
+              </button>
+
+              {/* Textarea + animated placeholder */}
+              <div className="relative flex-1 min-h-[34px]">
+                <textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onFocus={() => setInputActive(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend(e);
+                    }
+                  }}
+                  disabled={isProcessing}
+                  rows={1}
+                  className={`w-full resize-none border-0 outline-none bg-transparent text-sm font-normal leading-relaxed py-1.5 px-1 disabled:opacity-50 ${theme === 'dark' ? 'text-white' : 'text-gray-900'
+                    }`}
+                  style={{ minHeight: '34px', maxHeight: '120px', overflowY: 'auto', position: 'relative', zIndex: 1 }}
+                />
+                {/* Animated placeholder */}
+                <div className="absolute left-1 top-0 w-full h-full pointer-events-none flex items-center py-1.5">
+                  <AnimatePresence mode="wait">
+                    {showPlaceholder && !inputActive && !inputValue && (
+                      <motion.span
+                        key={placeholderIndex}
+                        className="absolute left-0 top-1/2 -translate-y-1/2 text-gray-400 select-none pointer-events-none text-sm"
+                        style={{ whiteSpace: 'nowrap', overflow: 'hidden', zIndex: 0 }}
+                        variants={{
+                          initial: {},
+                          animate: { transition: { staggerChildren: 0.022 } },
+                          exit: { transition: { staggerChildren: 0.012, staggerDirection: -1 } },
+                        }}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                      >
+                        {PLACEHOLDERS[placeholderIndex].split('').map((char, i) => (
+                          <motion.span
+                            key={i}
+                            style={{ display: 'inline-block' }}
+                            variants={{
+                              initial: { opacity: 0, filter: 'blur(10px)', y: 8 },
+                              animate: {
+                                opacity: 1, filter: 'blur(0px)', y: 0,
+                                transition: { opacity: { duration: 0.22 }, filter: { duration: 0.35 }, y: { type: 'spring', stiffness: 80, damping: 20 } },
+                              },
+                              exit: {
+                                opacity: 0, filter: 'blur(10px)', y: -8,
+                                transition: { opacity: { duration: 0.18 }, filter: { duration: 0.28 }, y: { type: 'spring', stiffness: 80, damping: 20 } },
+                              },
+                            }}
+                          >
+                            {char === ' ' ? '\u00A0' : char}
+                          </motion.span>
+                        ))}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              {/* Mic + Send */}
+              <div className="flex items-center gap-1 shrink-0 mt-1">
+                <button
+                  className={`p-2 rounded-full transition-colors ${theme === 'dark' ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                  title="Voice input"
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Mic size={18} />
+                </button>
+                <motion.button
+                  type="submit"
+                  disabled={isProcessing || (!inputValue.trim() && !imageData.base64)}
+                  className="flex items-center justify-center bg-gray-900 hover:bg-gray-700 text-white p-2.5 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Send"
+                  whileHover={{ scale: 1.07 }}
+                  whileTap={{ scale: 0.93 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {isProcessing
+                    ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-[17px] h-[17px] border-2 border-white/30 border-t-white rounded-full" />
+                    : <Send size={17} />}
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Expanded toolbar */}
+            <motion.div
+              className="w-full flex justify-start px-3 pb-2.5 items-center"
+              variants={{
+                hidden: { opacity: 0, y: 14, pointerEvents: 'none', transition: { duration: 0.18 } },
+                visible: { opacity: 1, y: 0, pointerEvents: 'auto', transition: { duration: 0.28, delay: 0.06 } },
+              }}
+              initial="hidden"
+              animate={inputActive || inputValue ? 'visible' : 'hidden'}
+            >
+              <div className="flex gap-2 items-center">
+                {/* Think toggle */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setThinkActive(a => !a); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all group ${thinkActive
+                    ? 'bg-amber-50 outline outline-amber-400 text-amber-800'
+                    : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                >
+                  <Lightbulb size={14} className={thinkActive ? 'fill-amber-400 text-amber-500' : 'group-hover:fill-yellow-300 transition-all'} />
+                  Think
+                </button>
+
+                {/* Deep Search toggle */}
+                <motion.button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setDeepSearchActive(a => !a); }}
+                  className={`flex items-center gap-1.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap overflow-hidden transition-colors ${deepSearchActive
+                    ? 'bg-blue-50 outline outline-blue-400 text-blue-800'
+                    : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  initial={false}
+                  animate={{ width: deepSearchActive ? 116 : 34, paddingLeft: deepSearchActive ? 10 : 9, paddingRight: deepSearchActive ? 10 : 9 }}
+                  transition={{ type: 'spring', stiffness: 200, damping: 22 }}
+                >
+                  <Globe size={14} className={`shrink-0 ${deepSearchActive ? 'text-blue-600' : ''}`} />
+                  <motion.span
+                    initial={false}
+                    animate={{ opacity: deepSearchActive ? 1 : 0 }}
+                    transition={{ duration: 0.16 }}
+                    className="ml-0.5"
+                  >
+                    Deep Search
+                  </motion.span>
+                </motion.button>
+
+                <span className="text-xs text-gray-400">↵ send · Shift+↵ newline</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        </form>
+      </div>
 
       {/* Settings Panel */}
       <SettingsPanel

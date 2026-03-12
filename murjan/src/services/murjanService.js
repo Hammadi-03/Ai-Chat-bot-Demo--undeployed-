@@ -14,6 +14,8 @@ import { detectEmotion, getSentiment } from '../utils/emotionDetector';
 
 // Proxied through Vite (dev) or Vercel Edge Function (production) to avoid CORS
 const NVIDIA_API_URL = '/api/nvidia';
+// Fallback endpoint (e.g., Ollama local server) for when NVIDIA fails
+const FALLBACK_API_URL = '/api/ollama';
 
 // Model routing
 const MODELS = {
@@ -33,6 +35,20 @@ function selectModel(text, hasImage) {
     if (wordCount > 30 || complexPatterns.test(text)) return MODELS.powerful;
     return MODELS.fast;
 }
+
+// Simple fallback model (Ollama's llama3) used when NVIDIA returns 500
+const FALLBACK_MODEL = 'ollama/llama3';
+
+// Custom Chat Template (ChatML format)
+const CUSTOM_CHAT_TEMPLATE = `{%- for message in messages %}
+    {%- if loop.first and messages[0]['role'] != 'system' %}
+        {{- '<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n' }}
+    {%- endif %}
+    {{- '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n' }}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\\n' }}
+{%- endif %}`;
 
 const MURJAN_SYSTEM_PROMPT = `You are Murjan, an advanced AI system designed to think, feel, and reason beyond standard chatbot behaviour.
 
@@ -138,95 +154,130 @@ class MurjanService {
             userContent = emotionalContext;
         }
 
-        const chosenModel = selectModel(text, !!imageData);
-        const isFast = chosenModel === MODELS.fast;
+        let chosenModel = selectModel(text, !!imageData);
+        let isFast = chosenModel === MODELS.fast;
 
-        console.log(`🤖 Routing to: ${chosenModel} (${isFast ? 'fast' : 'powerful'} mode)`);
+        let attempt = 0;
+        const maxAttempts = 2; // first try NVIDIA, then fallback
+        let payload;
 
-        const payload = {
-            model: chosenModel,
-            messages: [
-                { role: 'system', content: MURJAN_SYSTEM_PROMPT },
-                { role: 'user', content: userContent }
-            ],
-            max_tokens: isFast ? 2048 : 16384,
-            temperature: 0.60,
-            top_p: 0.95,
-            stream: true,
-            // Only enable extended thinking for the powerful model
-            ...(isFast ? {} : { chat_template_kwargs: { enable_thinking: true } }),
-        };
+        while (attempt < maxAttempts) {
+            const apiUrl = attempt === 0 ? NVIDIA_API_URL : FALLBACK_API_URL;
+            const model = attempt === 0 ? chosenModel : FALLBACK_MODEL;
 
-        try {
-            const response = await fetch(NVIDIA_API_URL, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream',
-                },
-                body: JSON.stringify(payload),
-            });
+            console.log(`🤖 Attempt ${attempt + 1}: routing to ${model} via ${apiUrl}`);
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`NVIDIA API error ${response.status}: ${errText}`);
-            }
+            payload = {
+                model,
+                messages: [
+                    { role: 'system', content: MURJAN_SYSTEM_PROMPT },
+                    { role: 'user', content: userContent }
+                ],
+                max_tokens: model === MODELS.fast ? 2048 : 16384,
+                temperature: 0.60,
+                top_p: 0.95,
+                stream: true,
+                chat_template: CUSTOM_CHAT_TEMPLATE,
+                ...(model === MODELS.fast ? {} : { chat_template_kwargs: { enable_thinking: true } }),
+            };
 
-            // Stream the response and accumulate text
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder('utf-8');
-            let fullText = '';
-            let buffer = '';
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.apiKey}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/event-stream',
+                    },
+                    body: JSON.stringify(payload),
+                });
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                if (!response.ok) {
+                    const errText = await response.text();
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); // keep incomplete line in buffer
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || trimmed === 'data: [DONE]') continue;
-                    if (!trimmed.startsWith('data: ')) continue;
-
-                    try {
-                        const json = JSON.parse(trimmed.slice(6));
-                        const delta = json?.choices?.[0]?.delta?.content;
-                        if (delta) fullText += delta;
-                    } catch {
-                        // skip malformed SSE lines
+                    // If NVIDIA returns 500 or 503, fall back on next iteration
+                    if (attempt === 0 && response.status >= 500) {
+                        console.warn(`NVIDIA API ${response.status} – falling back to local Ollama`);
+                        attempt++;
+                        continue;
                     }
+
+                    // Specialized error handling
+                    if (response.status === 401 || response.status === 403) {
+                        throw new Error('Invalid NVIDIA API key. Please check your API key.');
+                    }
+
+                    throw new Error(`API error ${response.status}: ${errText}`);
                 }
-            }
 
-            // Strip <think>...</think> blocks from the final response
-            const cleanText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-            const processingTime = Date.now() - startTime;
-
-            return {
-                text: cleanText || fullText.trim(),
-                metadata: {
+                // Successful response – break loop
+                return await this._processStream(response, {
+                    startTime,
                     userEmotion,
                     userSentiment,
-                    processingTime,
                     hasImage: !!imageData,
-                    model: chosenModel,
-                    timestamp: new Date().toISOString(),
+                    model
+                });
+            } catch (err) {
+                if (attempt === 0 && (err.message.includes('500') || err.message.includes('503') || err.name === 'TypeError')) {
+                    console.warn(`Encountered error (${err.message}), will retry with fallback model`);
+                    attempt++;
+                    continue;
                 }
-            };
-        } catch (error) {
-            console.error('Error processing message:', error);
-
-            if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
-                throw new Error('Invalid NVIDIA API key. Please check your API key.');
+                throw err;
             }
-
-            throw error;
         }
+
+        // If we exit loop without returning, throw generic error
+        throw new Error('Both primary and fallback AI services failed. Please check your network, API key, or try a different model.');
+    }
+
+    /**
+     * Consume the Server-Sent Events stream from the API
+     */
+    async _processStream(response, context) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let fullText = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === 'data: [DONE]') continue;
+                if (!trimmed.startsWith('data: ')) continue;
+
+                try {
+                    const json = JSON.parse(trimmed.slice(6));
+                    const delta = json?.choices?.[0]?.delta?.content;
+                    if (delta) fullText += delta;
+                } catch {
+                    // continue on malformed chunks
+                }
+            }
+        }
+
+        const cleanText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        const processingTime = Date.now() - context.startTime;
+
+        return {
+            text: cleanText || fullText.trim(),
+            metadata: {
+                userEmotion: context.userEmotion,
+                userSentiment: context.userSentiment,
+                processingTime,
+                hasImage: context.hasImage,
+                model: context.model,
+                timestamp: new Date().toISOString(),
+            }
+        };
     }
 
     /**
