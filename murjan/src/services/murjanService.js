@@ -7,12 +7,32 @@ import { detectEmotion, getSentiment } from '../utils/emotionDetector';
  * 2. Emotional Awareness Layer
  * 3. Multimodal Perception Layer
  *
- * Powered by NVIDIA API — Qwen3.5-122B-A10B (thinking mode enabled)
+ * Powered by NVIDIA API
+ * - Fast queries  → meta/llama-3.1-8b-instruct  (small, instant)
+ * - Complex queries → qwen/qwen3.5-122b-a10b    (deep reasoning + thinking)
  */
 
 // Proxied through Vite (dev) or Vercel Edge Function (production) to avoid CORS
 const NVIDIA_API_URL = '/api/nvidia';
-const MODEL = 'qwen/qwen3.5-122b-a10b';
+
+// Model routing
+const MODELS = {
+    fast: 'meta/llama-3.1-8b-instruct',  // ~1-2s — used for short/simple queries
+    powerful: 'qwen/qwen3.5-122b-a10b',     // ~5-15s — used for complex/image queries
+};
+
+/**
+ * Pick the right model based on query complexity.
+ * Fast model: short text, no image, simple words.
+ * Powerful model: long text, image present, or technical/complex content.
+ */
+function selectModel(text, hasImage) {
+    if (hasImage) return MODELS.powerful;
+    const wordCount = (text || '').trim().split(/\s+/).length;
+    const complexPatterns = /explain|analyze|compare|write|code|debug|translate|summarize|essay|report|calculate|why|how does|what is the difference/i;
+    if (wordCount > 30 || complexPatterns.test(text)) return MODELS.powerful;
+    return MODELS.fast;
+}
 
 const MURJAN_SYSTEM_PROMPT = `You are Murjan, an advanced AI system designed to think, feel, and reason beyond standard chatbot behaviour.
 
@@ -118,17 +138,23 @@ class MurjanService {
             userContent = emotionalContext;
         }
 
+        const chosenModel = selectModel(text, !!imageData);
+        const isFast = chosenModel === MODELS.fast;
+
+        console.log(`🤖 Routing to: ${chosenModel} (${isFast ? 'fast' : 'powerful'} mode)`);
+
         const payload = {
-            model: MODEL,
+            model: chosenModel,
             messages: [
                 { role: 'system', content: MURJAN_SYSTEM_PROMPT },
                 { role: 'user', content: userContent }
             ],
-            max_tokens: 16384,
+            max_tokens: isFast ? 2048 : 16384,
             temperature: 0.60,
             top_p: 0.95,
             stream: true,
-            chat_template_kwargs: { enable_thinking: true },
+            // Only enable extended thinking for the powerful model
+            ...(isFast ? {} : { chat_template_kwargs: { enable_thinking: true } }),
         };
 
         try {
@@ -188,6 +214,7 @@ class MurjanService {
                     userSentiment,
                     processingTime,
                     hasImage: !!imageData,
+                    model: chosenModel,
                     timestamp: new Date().toISOString(),
                 }
             };
