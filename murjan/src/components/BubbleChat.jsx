@@ -6,8 +6,8 @@ const BubbleChat = ({ text, sender, isAi, metadata, imagePreview }) => {
   return (
     <div className={`flex w-full mb-4 ${isAi ? 'justify-start' : 'justify-end'} animate-fadeIn`}>
       <div className={`max-w-[85%] ${isAi
-          ? 'bg-white/90 backdrop-blur-sm text-gray-800 rounded-2xl rounded-tl-none border border-gray-200 shadow-lg'
-          : 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl rounded-tr-none shadow-lg'
+        ? 'bg-white/90 backdrop-blur-sm text-gray-800 rounded-2xl rounded-tl-none border border-gray-200 shadow-lg'
+        : 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-2xl rounded-tr-none shadow-lg'
         } p-4`}>
 
         {/* Sender info */}
@@ -46,7 +46,9 @@ const BubbleChat = ({ text, sender, isAi, metadata, imagePreview }) => {
         {/* Message text */}
         <div className="prose prose-sm max-w-none">
           {isAi ? (
-            <ReactMarkdown className="text-sm leading-relaxed">{text}</ReactMarkdown>
+            <div className="text-sm leading-relaxed">
+              <ReactMarkdown>{text}</ReactMarkdown>
+            </div>
           ) : (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{text}</p>
           )}

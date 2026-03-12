@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { detectEmotion, getSentiment } from '../utils/emotionDetector';
 
 /**
@@ -7,7 +6,13 @@ import { detectEmotion, getSentiment } from '../utils/emotionDetector';
  * 1. Cognitive Reasoning Layer
  * 2. Emotional Awareness Layer
  * 3. Multimodal Perception Layer
+ *
+ * Powered by NVIDIA API — Qwen3.5-122B-A10B (thinking mode enabled)
  */
+
+// Proxied through Vite (dev) or Vercel Edge Function (production) to avoid CORS
+const NVIDIA_API_URL = '/api/nvidia';
+const MODEL = 'qwen/qwen3.5-122b-a10b';
 
 const MURJAN_SYSTEM_PROMPT = `You are Murjan, an advanced AI system designed to think, feel, and reason beyond standard chatbot behaviour.
 
@@ -63,8 +68,7 @@ You are Murjan.`;
 
 class MurjanService {
     constructor() {
-        this.genAI = null;
-        this.model = null;
+        this.apiKey = null;
         this.initialized = false;
     }
 
@@ -72,23 +76,12 @@ class MurjanService {
      * Initialize the AI service with API key
      */
     initialize(apiKey) {
-        if (!apiKey || apiKey === 'your_api_key_here' || apiKey.includes('DEMO')) {
-            throw new Error('Valid Gemini API key required. Get one at https://makersuite.google.com/app/apikey');
+        if (!apiKey || apiKey.includes('DEMO') || apiKey === 'your_api_key_here') {
+            throw new Error('Valid NVIDIA API key required. Get one at https://integrate.api.nvidia.com/');
         }
-
-        try {
-            this.genAI = new GoogleGenerativeAI(apiKey);
-            this.model = this.genAI.getGenerativeModel({
-                model: 'gemini-2.0-flash-exp',
-                systemInstruction: MURJAN_SYSTEM_PROMPT,
-            });
-            this.initialized = true;
-            console.log('✅ Murjan AI initialized successfully');
-        } catch (error) {
-            console.error('❌ Failed to initialize Murjan AI:', error);
-            this.initialized = false;
-            throw error;
-        }
+        this.apiKey = apiKey;
+        this.initialized = true;
+        console.log('✅ Murjan AI (NVIDIA/Qwen) initialized successfully');
     }
 
     /**
@@ -104,41 +97,92 @@ class MurjanService {
 
         const startTime = Date.now();
 
+        // Layer 2: Emotional Awareness
+        const userEmotion = detectEmotion(text);
+        const userSentiment = getSentiment(text);
+
+        // Build the user message content
+        const emotionalContext = `[User's detected emotion: ${userEmotion}, sentiment: ${userSentiment}]\n\n${text}`;
+
+        let userContent;
+        if (imageData) {
+            // Layer 3: Multimodal — include image as base64 URL
+            userContent = [
+                { type: 'text', text: emotionalContext },
+                {
+                    type: 'image_url',
+                    image_url: { url: `data:image/jpeg;base64,${imageData}` }
+                }
+            ];
+        } else {
+            userContent = emotionalContext;
+        }
+
+        const payload = {
+            model: MODEL,
+            messages: [
+                { role: 'system', content: MURJAN_SYSTEM_PROMPT },
+                { role: 'user', content: userContent }
+            ],
+            max_tokens: 16384,
+            temperature: 0.60,
+            top_p: 0.95,
+            stream: true,
+            chat_template_kwargs: { enable_thinking: true },
+        };
+
         try {
-            // Layer 2: Emotional Awareness - Analyze user's emotional state
-            const userEmotion = detectEmotion(text);
-            const userSentiment = getSentiment(text);
+            const response = await fetch(NVIDIA_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
+                },
+                body: JSON.stringify(payload),
+            });
 
-            // Prepare content for AI
-            let content = [];
-
-            // Add emotional context to the prompt
-            const emotionalContext = `[User's detected emotion: ${userEmotion}, sentiment: ${userSentiment}]\n\n${text}`;
-
-            if (imageData) {
-                // Layer 3: Multimodal Perception - Include image analysis
-                content = [
-                    { text: emotionalContext },
-                    {
-                        inlineData: {
-                            mimeType: 'image/jpeg',
-                            data: imageData
-                        }
-                    }
-                ];
-            } else {
-                content = [{ text: emotionalContext }];
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`NVIDIA API error ${response.status}: ${errText}`);
             }
 
-            // Layer 1: Cognitive Reasoning - Get AI response
-            const result = await this.model.generateContent(content);
-            const response = await result.response;
-            const responseText = response.text();
+            // Stream the response and accumulate text
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let fullText = '';
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // keep incomplete line in buffer
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed === 'data: [DONE]') continue;
+                    if (!trimmed.startsWith('data: ')) continue;
+
+                    try {
+                        const json = JSON.parse(trimmed.slice(6));
+                        const delta = json?.choices?.[0]?.delta?.content;
+                        if (delta) fullText += delta;
+                    } catch {
+                        // skip malformed SSE lines
+                    }
+                }
+            }
+
+            // Strip <think>...</think> blocks from the final response
+            const cleanText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
             const processingTime = Date.now() - startTime;
 
             return {
-                text: responseText,
+                text: cleanText || fullText.trim(),
                 metadata: {
                     userEmotion,
                     userSentiment,
@@ -150,9 +194,8 @@ class MurjanService {
         } catch (error) {
             console.error('Error processing message:', error);
 
-            // Provide helpful error messages
-            if (error.message?.includes('API key')) {
-                throw new Error('Invalid API key. Please check your Gemini API key.');
+            if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+                throw new Error('Invalid NVIDIA API key. Please check your API key.');
             }
 
             throw error;

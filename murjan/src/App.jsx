@@ -35,7 +35,7 @@ function App() {
   // Check for API key in environment
   useEffect(() => {
     try {
-      const envKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const envKey = import.meta.env.VITE_NVIDIA_API_KEY;
       if (envKey && !envKey.includes('DEMO') && !envKey.includes('your_api_key')) {
         setApiKey(envKey);
         try {
@@ -43,7 +43,7 @@ function App() {
           setShowApiInput(false);
         } catch (err) {
           console.error('Failed to initialize with env key:', err);
-          setError('Failed to initialize AI. Please enter API key manually.');
+          setError('Failed to initialize AI. Please enter your NVIDIA API key manually.');
           setShowApiInput(true);
         }
       }
@@ -162,7 +162,7 @@ function App() {
           <form onSubmit={handleApiKeySubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Google Gemini API Key
+                NVIDIA API Key
               </label>
               <input
                 type="password"
@@ -186,12 +186,12 @@ function App() {
             <div className="text-center pt-4 border-t border-gray-200">
               <p className="text-xs text-gray-600 mb-2">Don't have an API key?</p>
               <a
-                href="https://makersuite.google.com/app/apikey"
+                href="https://integrate.api.nvidia.com/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-indigo-600 hover:underline font-semibold"
               >
-                Get one from Google AI Studio →
+                Get one from NVIDIA AI Endpoints →
               </a>
             </div>
           </form>
@@ -235,8 +235,8 @@ function App() {
       </div>
 
       {/* Messages */}
-      <div className={`flex - 1 overflow - y - auto p - 4 flex flex - col gap - 2 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white/50'
-        } `}>
+      <div className={`flex-1 overflow-y-auto p-4 flex flex-col gap-2 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white/50'
+        }`}>
         {messages.map((msg, index) => (
           <BubbleChat key={index} {...msg} />
         ))}
@@ -254,8 +254,8 @@ function App() {
       )}
 
       {/* Input Area */}
-      <form onSubmit={handleSend} className={`p - 4 flex flex - col gap - 3 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'
-        } border - t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} `}>
+      <form onSubmit={handleSend} className={`p-4 flex flex-col gap-3 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'
+        } border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
 
         {/* Image Upload */}
         <div className="flex items-center gap-2">
@@ -273,10 +273,10 @@ function App() {
             onChange={(e) => setInputValue(e.target.value)}
             placeholder="Ask Murjan anything..."
             disabled={isProcessing}
-            className={`flex - 1 border ${theme === 'dark'
-                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
-                : 'bg-white border-gray-300 text-black'
-              } rounded - full px - 5 py - 3 text - sm focus: outline - none focus: ring - 2 focus: ring - indigo - 500 transition - all disabled: opacity - 50 shadow - sm`}
+            className={`flex-1 border ${theme === 'dark'
+              ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
+              : 'bg-white border-gray-300 text-black'
+              } rounded-full px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-50 shadow-sm`}
           />
           <button
             type="submit"
