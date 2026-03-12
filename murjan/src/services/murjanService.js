@@ -127,10 +127,7 @@ class MurjanService {
      * @returns {Promise<Object>} - AI response with metadata
      */
     async processMessage(text, imageData = null) {
-        if (!this.initialized) {
-            throw new Error('Murjan AI not initialized. Please provide an API key.');
-        }
-
+        // Do not throw an error if uninitialized; we will route to the local fallback automatically.
         const startTime = Date.now();
 
         // Layer 2: Emotional Awareness
@@ -157,9 +154,13 @@ class MurjanService {
         let chosenModel = selectModel(text, !!imageData);
         let isFast = chosenModel === MODELS.fast;
 
-        let attempt = 0;
-        const maxAttempts = 2; // first try NVIDIA, then fallback
+        let attempt = this.initialized ? 0 : 1; // Start at attempt 1 (Local fallback) if missing NVIDIA key
+        const maxAttempts = 2; // 0 = NVIDIA, 1 = fallback
         let payload;
+
+        if (!this.initialized) {
+            console.warn("NVIDIA key missing. Automatically routing to local fallback (Ollama).");
+        }
 
         while (attempt < maxAttempts) {
             const apiUrl = attempt === 0 ? NVIDIA_API_URL : FALLBACK_API_URL;

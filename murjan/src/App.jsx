@@ -108,7 +108,8 @@ function App() {
   const handleApiKeySubmit = (e) => {
     e.preventDefault();
     if (!apiKey.trim()) {
-      setError('Please enter an API key');
+      // If user tries to sumbit empty primary key, fall back to bypass
+      handleBypassToLocal();
       return;
     }
 
@@ -119,6 +120,12 @@ function App() {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const handleBypassToLocal = () => {
+    // Allows bypassing the API screen to rely on local Ollama entirely
+    setShowApiInput(false);
+    setError('');
   };
 
   const handleImageSelect = (base64, preview) => {
@@ -236,6 +243,14 @@ function App() {
               className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-bold hover:shadow-lg transition-all"
             >
               Start Murjan
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBypassToLocal}
+              className="w-full bg-white text-gray-700 border border-gray-200 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all shadow-sm"
+            >
+              Continue with Local Model (Ollama)
             </button>
 
             <div className="text-center pt-4 border-t border-gray-200">
