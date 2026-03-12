@@ -158,14 +158,14 @@ function App() {
     try {
       // Simulate layer processing
       setCurrentLayer('cognitive');
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       setCurrentLayer('emotional');
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       if (currentImage) {
         setCurrentLayer('multimodal');
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       // Get AI response

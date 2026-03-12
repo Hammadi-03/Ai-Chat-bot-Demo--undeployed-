@@ -174,12 +174,10 @@ class MurjanService {
                     { role: 'system', content: MURJAN_SYSTEM_PROMPT },
                     { role: 'user', content: userContent }
                 ],
-                max_tokens: model === MODELS.fast ? 2048 : 16384,
+                max_tokens: 2048, // Reduced from 16384 to guarantee much faster completion caps
                 temperature: 0.60,
                 top_p: 0.95,
                 stream: true,
-                chat_template: CUSTOM_CHAT_TEMPLATE,
-                ...(model === MODELS.fast ? {} : { chat_template_kwargs: { enable_thinking: true } }),
             };
 
             try {
